@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <title>流體推理測驗與分析系統</title>
+    <meta name="author" content="BRIAN SHEN">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #pdf-canvas { border: 2px solid #e5e7eb; max-width: 100%; border-radius: 8px; }
+        .active-btn { background-color: #2563eb !important; color: white; border-color: #1e40af !important; }
+        
+        .wrong-page-img { 
+            border: 2px solid #ef4444; 
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px; 
+            display: block;
+            margin: 10px auto;
+        }
+        
+        @media print {
+            @page { size: A4; margin: 1.5cm; }
+            body { background: white; }
+            body * { visibility: hidden; }
+            #result-section, #result-section * { visibility: visible; }
+            #result-section { position: absolute; left: 0; top: 0; width: 100%; }
+            .no-print { display: none !important; }
+            
+            /* 強制每一題單獨一頁，徹底解決跳頁切斷問題 */
+            .wrong-item { 
+                visibility: visible;
+                page-break-after: always; /* 舊版瀏覽器相容 */
+                break-after: page;        /* 新版瀏覽器標準 */
+                margin-bottom: 0;
+                padding: 1cm 0;
+            }
+            
+            .wrong-page-img {
+                max-height: 17cm !important; /* 嚴格限制高度，確保不超過 A4 */
+                width: auto !important;
+                margin-left: auto;
+                margin-right: auto;
+            }
+
+            .report-header { margin-bottom: 2cm; page-break-after: avoid; }
+        }
+        .ready-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    </style>
+</head>
+
+<body class="bg-slate-50 min-h-screen p-5">
+    <div class="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-xl">
+        <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">流體推理 (彩印) 測驗系統</h1>
+
+        <div id="setup-section" class="space-y-6">
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded">
+                <h3 class="font-bold text-blue-700 mb-2">📢 監考老師設定</h3>
+                <p class="text-blue-800 text-sm">請完成基本設定，隨後交給學生點擊準備頁面。</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="pdf-upload-row">
+                <div class="md:col-span-2">
+                    <label class="block font-bold text-gray-700 mb-1">學生姓名：</label>
+                    <input type="text" id="student-name" placeholder="請輸入學生姓名" class="w-full border p-2 rounded-lg bg-yellow-50 focus:ring-2 focus:ring-yellow-400 outline-none">
+                </div>
+                <div id="pdf-upload-cell">
+                    <label class="block font-bold text-gray-700 mb-1">上傳 PDF 題目卷：</label>
+                    <input type="file" id="pdf-upload" accept="application/pdf" class="w-full border p-2 rounded-lg">
+                </div>
+                <div>
+                    <label class="block font-bold text-gray-700 mb-1">限制時間 (分鐘)：</label>
+                    <input type="number" id="timer-setting" value="40" class="w-full border p-2 rounded-lg">
+                </div>
+            </div>
+            <div id="embedded-pdf-notice" class="hidden bg-green-50 border-l-4 border-green-500 p-3 rounded text-sm text-green-800 mb-4">
+                ✓ 已使用內建題本，無需上傳 PDF。
+            </div>
+            <div class="hidden">
+                <textarea id="correct-answers">A,B,C,B,D,A,C,C,B,C,D,C,B,C,D,A,D,C,B,C,2,4,6,4,3,5,1,5,6,3,4,2,1,2,3,5,1,5,5,1,4,1,3,2,4,5,3,5,2,1,4,3,5,2,4,1,5,3,1,4,2,4,1,2,5,1,3,2,4,5,2,4,1,3,5,4,1,4,3,5</textarea>
+            </div>
+            
+            <button id="start-btn" onclick="goToReadyScreen()" disabled class="w-full py-4 rounded-xl font-bold text-lg shadow-md transition bg-gray-400 cursor-not-allowed text-black">
+                請先輸入姓名並上傳檔案
+            </button>
+        </div>
+
+        <div id="ready-section" class="hidden py-10 text-center space-y-8">
+            <div class="ready-bg p-8 rounded-3xl text-white shadow-2xl">
+                <h2 class="text-2xl font-bold mb-2">你好，<span id="ready-student-name"></span>！</h2>
+                <p>準備好開始測驗了嗎？</p>
+            </div>
+            <div class="bg-gray-50 p-6 rounded-2xl border-2 border-dashed border-gray-300 text-left max-w-md mx-auto text-sm space-y-2">
+                <p>⏱️ 時間：<span id="ready-timer-info"></span> 分鐘</p>
+                <p>📖 題數：共 80 題</p>
+                <p>💡 提示：按「我不會這題」可跳過，系統會自動進入下一題。</p>
+            </div>
+            <button onclick="startActualQuiz()" class="w-full max-w-sm py-6 bg-indigo-600 text-white rounded-2xl font-black text-2xl shadow-xl hover:bg-indigo-700 transform hover:scale-105 transition-all">
+                🚀 開始考試！
+            </button>
+        </div>
+
+        <div id="quiz-section" class="hidden">
+            <div class="flex justify-between items-center mb-4 bg-indigo-50 p-4 rounded-lg">
+                <div>
+                    <div id="student-display" class="text-sm text-indigo-700 font-bold"></div>
+                    <span id="page-info" class="text-lg font-bold text-indigo-900">載入中...</span>
+                </div>
+                <div class="text-right">
+                    <div class="text-xl font-mono font-bold text-red-500" id="timer-display">00:00</div>
+                    <div class="text-xs text-gray-500" id="page-timer">本題用時: 0 秒</div>
+                </div>
+            </div>
+            <div class="flex justify-center mb-6">
+                <canvas id="pdf-canvas"></canvas>
+            </div>
+            <div class="flex flex-col items-center space-y-4">
+                <div class="flex flex-wrap justify-center gap-3">
+                    <button onclick="selectOption('A')" class="opt-btn w-14 h-14 text-xl border-2 border-indigo-400 rounded-full font-bold">A</button>
+                    <button onclick="selectOption('B')" class="opt-btn w-14 h-14 text-xl border-2 border-indigo-400 rounded-full font-bold">B</button>
+                    <button onclick="selectOption('C')" class="opt-btn w-14 h-14 text-xl border-2 border-indigo-400 rounded-full font-bold">C</button>
+                    <button onclick="selectOption('D')" class="opt-btn w-14 h-14 text-xl border-2 border-indigo-400 rounded-full font-bold">D</button>
+                </div>
+                <div class="flex flex-wrap justify-center gap-2">
+                    <button onclick="selectOption('1')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">1</button>
+                    <button onclick="selectOption('2')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">2</button>
+                    <button onclick="selectOption('3')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">3</button>
+                    <button onclick="selectOption('4')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">4</button>
+                    <button onclick="selectOption('5')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">5</button>
+                    <button onclick="selectOption('6')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">6</button>
+                </div>
+                <button onclick="markDontKnow()" id="dont-know-btn" class="w-full py-2 bg-yellow-400 text-white rounded-lg font-bold">我不會這題</button>
+                <div class="flex space-x-4 w-full pt-2">
+                    <button onclick="prevPage()" class="flex-1 py-3 bg-gray-200 rounded-lg">上一題</button>
+                    <button onclick="nextPage()" class="flex-1 py-3 bg-gray-200 rounded-lg">下一題</button>
+                </div>
+                <button id="finish-btn" onclick="finishQuiz()" style="display:none" class="w-full py-4 bg-green-500 text-white rounded-xl font-black text-xl shadow-lg">交卷並查看結果</button>
+            </div>
+        </div>
+
+        <div id="result-section" class="hidden mt-10">
+            <div class="report-header text-center mb-8 pb-6 border-b-2 border-gray-100">
+                <h2 class="text-2xl font-bold text-gray-800">流體推理測驗報告</h2>
+                <p class="text-lg mt-2">學生：<span id="result-name" class="font-bold text-indigo-600"></span></p>
+                <p class="text-3xl font-black mt-2 text-red-600">得分：<span id="final-score"></span> / 100</p>
+                <p class="text-sm text-gray-400 mt-1">產出日期：<span id="report-date"></span></p>
+            </div>
+            
+            <div id="report-loading" class="text-center p-10 space-y-4 no-print">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+                <p class="text-indigo-600 font-bold">正在整理報告，請稍候...</p>
+            </div>
+
+            <div id="wrong-answers-container"></div>
+            
+            <div id="result-actions" class="hidden space-y-4 no-print mt-10">
+                <div class="bg-orange-50 p-4 rounded-lg border-l-4 border-orange-400 text-sm text-orange-800">
+                    💡 點擊下方按鈕後，在印表機目標請選擇<strong>「另存為 PDF」</strong>。建議設定為 A4 尺寸。
+                </div>
+                <button onclick="window.print()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-xl shadow-lg hover:bg-indigo-700">
+                    💾 儲存 PDF 報告 / 列印
+                </button>
+                <button onclick="location.reload()" class="w-full py-3 bg-gray-400 text-white rounded-xl">重新測驗</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        // 若有內嵌題本，此變數會由合併腳本填入 base64 字串
+        var EMBEDDED_PDF_BASE64 = null;
+        // 網頁版：從同目錄自動載入的 PDF（用 http 開此頁時會自動抓）
+        var AUTO_LOADED_PDF_ARRAY = null;
+
+        let pdfDoc = null, currentPage = 1, userAnswers = [], userAnswerStartTimes = [], correctAnswers = [], studentName = "", timeLimitMinutes = 40;
+        let timerInterval = null, pageTimerInterval = null, pdfDataArray = null;
+
+        function hasEmbeddedPdf() { return typeof EMBEDDED_PDF_BASE64 === 'string' && EMBEDDED_PDF_BASE64.length > 0; }
+        function hasAutoLoadedPdf() { return AUTO_LOADED_PDF_ARRAY && AUTO_LOADED_PDF_ARRAY.length > 0; }
+        function hasPdfReady() { return hasEmbeddedPdf() || hasAutoLoadedPdf(); }
+
+        function checkSetupCompletion() {
+            const name = document.getElementById('student-name').value.trim();
+            const file = document.getElementById('pdf-upload').files.length > 0;
+            const btn = document.getElementById('start-btn');
+            const needFile = !hasPdfReady();
+            if (name && (file || !needFile)) {
+                btn.disabled = false;
+                btn.className = "w-full py-4 rounded-xl font-bold text-lg shadow-md transition bg-indigo-500 text-white";
+                btn.textContent = "設定完成，進入準備畫面";
+            }
+        }
+
+        function goToReadyScreen() {
+            studentName = document.getElementById('student-name').value.trim();
+            timeLimitMinutes = parseInt(document.getElementById('timer-setting').value);
+            correctAnswers = document.getElementById('correct-answers').value.toUpperCase().replace(/\s/g, '').split(',');
+            if (hasEmbeddedPdf()) {
+                const binary = atob(EMBEDDED_PDF_BASE64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                pdfDataArray = bytes;
+                document.getElementById('ready-student-name').textContent = studentName;
+                document.getElementById('ready-timer-info').textContent = timeLimitMinutes;
+                document.getElementById('setup-section').classList.add('hidden');
+                document.getElementById('ready-section').classList.remove('hidden');
+            } else if (hasAutoLoadedPdf()) {
+                pdfDataArray = AUTO_LOADED_PDF_ARRAY;
+                document.getElementById('ready-student-name').textContent = studentName;
+                document.getElementById('ready-timer-info').textContent = timeLimitMinutes;
+                document.getElementById('setup-section').classList.add('hidden');
+                document.getElementById('ready-section').classList.remove('hidden');
+            } else {
+                const file = document.getElementById('pdf-upload').files[0];
+                const reader = new FileReader();
+                reader.onload = function() {
+                    pdfDataArray = new Uint8Array(this.result);
+                    document.getElementById('ready-student-name').textContent = studentName;
+                    document.getElementById('ready-timer-info').textContent = timeLimitMinutes;
+                    document.getElementById('setup-section').classList.add('hidden');
+                    document.getElementById('ready-section').classList.remove('hidden');
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function initSetupUI() {
+            if (hasPdfReady()) {
+                var cell = document.getElementById('pdf-upload-cell');
+                if (cell) cell.style.display = 'none';
+                var notice = document.getElementById('embedded-pdf-notice');
+                if (notice) {
+                    notice.classList.remove('hidden');
+                    notice.innerHTML = hasAutoLoadedPdf() ? '✓ 已自動載入同目錄題本（網頁版），無需上傳 PDF。' : '✓ 已使用內建題本，無需上傳 PDF。';
+                }
+                document.getElementById('start-btn').textContent = '請先輸入姓名';
+            }
+        }
+
+        // 網頁版：從同目錄自動載入 PDF（僅在 http/https 下有效，雙擊開 file:// 無效）
+        async function tryAutoLoadPdf() {
+            if (hasEmbeddedPdf()) { initSetupUI(); return; }
+            try {
+                var url = '流體推理(電腦測驗用題本).pdf';
+                var res = await fetch(url);
+                if (!res.ok) throw new Error(res.status);
+                var buf = await res.arrayBuffer();
+                AUTO_LOADED_PDF_ARRAY = new Uint8Array(buf);
+                initSetupUI();
+            } catch (e) {
+                initSetupUI();
+            }
+        }
+
+        async function startActualQuiz() {
+            pdfDoc = await pdfjsLib.getDocument(pdfDataArray).promise;
+            userAnswers = new Array(pdfDoc.numPages).fill(null);
+            userAnswerStartTimes = new Array(pdfDoc.numPages).fill(null);
+            document.getElementById('ready-section').classList.add('hidden');
+            document.getElementById('quiz-section').classList.remove('hidden');
+            document.getElementById('student-display').textContent = `考生：${studentName}`;
+            startGlobalTimer(timeLimitMinutes * 60);
+            renderPage(1);
+        }
+
+        async function renderPage(num) {
+            currentPage = num;
+            const page = await pdfDoc.getPage(num);
+            const canvas = document.getElementById('pdf-canvas');
+            const viewport = page.getViewport({ scale: 1.2 });
+            canvas.height = viewport.height; canvas.width = viewport.width;
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+            document.getElementById('page-info').textContent = `第 ${num} / ${pdfDoc.numPages} 題`;
+            userAnswerStartTimes[num - 1] = Date.now();
+            startPageTimer(num);
+            updateBtnHighlight();
+            document.getElementById('finish-btn').style.display = (num === pdfDoc.numPages ? 'block' : 'none');
+        }
+
+        function selectOption(opt) {
+            userAnswers[currentPage - 1] = opt;
+            updateBtnHighlight();
+            if (currentPage < pdfDoc.numPages) setTimeout(() => renderPage(currentPage + 1), 200);
+        }
+
+        function markDontKnow() { selectOption('我不會這題'); }
+
+        function updateBtnHighlight() {
+            const currentAns = String(userAnswers[currentPage - 1]);
+            document.querySelectorAll('.opt-btn').forEach(btn => {
+                btn.classList.toggle('active-btn', btn.textContent === currentAns);
+            });
+            document.getElementById('dont-know-btn').classList.toggle('active-btn', currentAns === '我不會這題');
+        }
+
+        function startPageTimer(num) {
+            if (pageTimerInterval) clearInterval(pageTimerInterval);
+            const el = document.getElementById('page-timer');
+            pageTimerInterval = setInterval(() => {
+                const sec = Math.floor((Date.now() - userAnswerStartTimes[num-1]) / 1000);
+                el.textContent = `本題用時: ${sec} 秒`;
+            }, 1000);
+        }
+
+        function startGlobalTimer(seconds) {
+            let timeLeft = seconds;
+            timerInterval = setInterval(() => {
+                const mins = Math.floor(timeLeft / 60), secs = timeLeft % 60;
+                document.getElementById('timer-display').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                if (timeLeft-- <= 0) { clearInterval(timerInterval); finishQuiz(); }
+            }, 1000);
+        }
+
+        async function finishQuiz() {
+            clearInterval(timerInterval);
+            document.getElementById('quiz-section').classList.add('hidden');
+            document.getElementById('result-section').classList.remove('hidden');
+            
+            let scoreCount = 0;
+            const container = document.getElementById('wrong-answers-container');
+            container.innerHTML = '<h3 class="font-bold text-lg mb-6 text-red-700 no-print">錯題詳細紀錄：</h3>';
+            
+            for (let i = 0; i < pdfDoc.numPages; i++) {
+                if (String(userAnswers[i]) === String(correctAnswers[i])) {
+                    scoreCount++;
+                } else {
+                    const pageNum = i + 1;
+                    const page = await pdfDoc.getPage(pageNum);
+                    const canvas = document.createElement('canvas');
+                    const viewport = page.getViewport({ scale: 1.5 }); // 提升截圖清晰度
+                    canvas.height = viewport.height; canvas.width = viewport.width;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+                    
+                    const div = document.createElement('div');
+                    div.className = "wrong-item"; 
+                    div.innerHTML = `
+                        <p class="font-bold text-red-600 mb-2 text-xl">第 ${pageNum} 題：學生作答 [${userAnswers[i] || '未答'}]，正確答案 [${correctAnswers[i]}]</p>
+                        <img src="${canvas.toDataURL('image/jpeg', 0.8)}" class="wrong-page-img">
+                    `;
+                    container.appendChild(div);
+                }
+            }
+            
+            document.getElementById('result-name').textContent = studentName;
+            document.getElementById('final-score').textContent = Math.round((scoreCount / pdfDoc.numPages) * 100);
+            document.getElementById('report-date').textContent = new Date().toLocaleString();
+            document.getElementById('report-loading').classList.add('hidden');
+            document.getElementById('result-actions').classList.remove('hidden');
+        }
+
+        document.getElementById('student-name').addEventListener('input', checkSetupCompletion);
+        document.getElementById('pdf-upload').addEventListener('change', checkSetupCompletion);
+        document.addEventListener('DOMContentLoaded', tryAutoLoadPdf);
+        function prevPage() { if (currentPage > 1) renderPage(currentPage - 1); }
+        function nextPage() { if (currentPage < pdfDoc.numPages) renderPage(currentPage + 1); }
+    </script>
+</body>
+</html>
