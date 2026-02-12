@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>流體推理測驗與分析系統</title>
+    <title>新東資優班複試集訓 - 智力測驗 FRI 流體推理</title>
     <meta name="author" content="BRIAN SHEN">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -19,6 +19,14 @@
             display: block;
             margin: 10px auto;
         }
+        .slow-page-img {
+            border: 2px solid #d97706;
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            display: block;
+            margin: 10px auto;
+        }
         
         @media print {
             @page { size: A4; margin: 1.5cm; }
@@ -29,16 +37,16 @@
             .no-print { display: none !important; }
             
             /* 強制每一題單獨一頁，徹底解決跳頁切斷問題 */
-            .wrong-item { 
+            .wrong-item, .slow-item { 
                 visibility: visible;
-                page-break-after: always; /* 舊版瀏覽器相容 */
-                break-after: page;        /* 新版瀏覽器標準 */
+                page-break-after: always;
+                break-after: page;
                 margin-bottom: 0;
                 padding: 1cm 0;
             }
             
-            .wrong-page-img {
-                max-height: 17cm !important; /* 嚴格限制高度，確保不超過 A4 */
+            .wrong-page-img, .slow-page-img {
+                max-height: 17cm !important;
                 width: auto !important;
                 margin-left: auto;
                 margin-right: auto;
@@ -52,7 +60,11 @@
 
 <body class="bg-slate-50 min-h-screen p-5">
     <div class="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-xl">
-        <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">流體推理 (彩印) 測驗系統</h1>
+        <h1 class="text-3xl font-bold mb-6 text-center text-indigo-600">
+            <span class="block">新東資優班複試集訓</span>
+            <span class="block text-2xl mt-1">智力測驗</span>
+            <span class="block text-xl mt-1" style="color: #1b4332;">FRI 流體推理</span>
+        </h1>
 
         <div id="setup-section" class="space-y-6">
             <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded">
@@ -94,7 +106,6 @@
             <div class="bg-gray-50 p-6 rounded-2xl border-2 border-dashed border-gray-300 text-left max-w-md mx-auto text-sm space-y-2">
                 <p>⏱️ 時間：<span id="ready-timer-info"></span> 分鐘</p>
                 <p>📖 題數：共 80 題</p>
-                <p>💡 提示：按「我不會這題」可跳過，系統會自動進入下一題。</p>
             </div>
             <button onclick="startActualQuiz()" class="w-full max-w-sm py-6 bg-indigo-600 text-white rounded-2xl font-black text-2xl shadow-xl hover:bg-indigo-700 transform hover:scale-105 transition-all">
                 🚀 開始考試！
@@ -130,7 +141,6 @@
                     <button onclick="selectOption('5')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">5</button>
                     <button onclick="selectOption('6')" class="opt-btn w-12 h-12 text-lg border-2 border-emerald-400 rounded-lg font-bold">6</button>
                 </div>
-                <button onclick="markDontKnow()" id="dont-know-btn" class="w-full py-2 bg-yellow-400 text-white rounded-lg font-bold">我不會這題</button>
                 <div class="flex space-x-4 w-full pt-2">
                     <button onclick="prevPage()" class="flex-1 py-3 bg-gray-200 rounded-lg">上一題</button>
                     <button onclick="nextPage()" class="flex-1 py-3 bg-gray-200 rounded-lg">下一題</button>
@@ -173,8 +183,14 @@
         // 網頁版：從同目錄自動載入的 PDF（用 http 開此頁時會自動抓）
         var AUTO_LOADED_PDF_ARRAY = null;
 
-        let pdfDoc = null, currentPage = 1, userAnswers = [], userAnswerStartTimes = [], correctAnswers = [], studentName = "", timeLimitMinutes = 40;
+        let pdfDoc = null, currentPage = 1, userAnswers = [], userAnswerStartTimes = [], userPageDurations = [], correctAnswers = [], studentName = "", timeLimitMinutes = 40;
         let timerInterval = null, pageTimerInterval = null, pdfDataArray = null;
+
+        function recordCurrentPageDuration() {
+            if (currentPage >= 1 && currentPage <= (userAnswerStartTimes.length || 0) && userAnswerStartTimes[currentPage - 1] != null) {
+                if (!userPageDurations[currentPage - 1]) userPageDurations[currentPage - 1] = Math.floor((Date.now() - userAnswerStartTimes[currentPage - 1]) / 1000);
+            }
+        }
 
         function hasEmbeddedPdf() { return typeof EMBEDDED_PDF_BASE64 === 'string' && EMBEDDED_PDF_BASE64.length > 0; }
         function hasAutoLoadedPdf() { return AUTO_LOADED_PDF_ARRAY && AUTO_LOADED_PDF_ARRAY.length > 0; }
@@ -257,6 +273,7 @@
             pdfDoc = await pdfjsLib.getDocument(pdfDataArray).promise;
             userAnswers = new Array(pdfDoc.numPages).fill(null);
             userAnswerStartTimes = new Array(pdfDoc.numPages).fill(null);
+            userPageDurations = new Array(pdfDoc.numPages).fill(null);
             document.getElementById('ready-section').classList.add('hidden');
             document.getElementById('quiz-section').classList.remove('hidden');
             document.getElementById('student-display').textContent = `考生：${studentName}`;
@@ -280,18 +297,16 @@
 
         function selectOption(opt) {
             userAnswers[currentPage - 1] = opt;
+            recordCurrentPageDuration();
             updateBtnHighlight();
             if (currentPage < pdfDoc.numPages) setTimeout(() => renderPage(currentPage + 1), 200);
         }
-
-        function markDontKnow() { selectOption('我不會這題'); }
 
         function updateBtnHighlight() {
             const currentAns = String(userAnswers[currentPage - 1]);
             document.querySelectorAll('.opt-btn').forEach(btn => {
                 btn.classList.toggle('active-btn', btn.textContent === currentAns);
             });
-            document.getElementById('dont-know-btn').classList.toggle('active-btn', currentAns === '我不會這題');
         }
 
         function startPageTimer(num) {
@@ -314,6 +329,7 @@
 
         async function finishQuiz() {
             clearInterval(timerInterval);
+            recordCurrentPageDuration();
             document.getElementById('quiz-section').classList.add('hidden');
             document.getElementById('result-section').classList.remove('hidden');
             
@@ -328,7 +344,7 @@
                     const pageNum = i + 1;
                     const page = await pdfDoc.getPage(pageNum);
                     const canvas = document.createElement('canvas');
-                    const viewport = page.getViewport({ scale: 1.5 }); // 提升截圖清晰度
+                    const viewport = page.getViewport({ scale: 1.5 });
                     canvas.height = viewport.height; canvas.width = viewport.width;
                     await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
                     
@@ -337,6 +353,33 @@
                     div.innerHTML = `
                         <p class="font-bold text-red-600 mb-2 text-xl">第 ${pageNum} 題：學生作答 [${userAnswers[i] || '未答'}]，正確答案 [${correctAnswers[i]}]</p>
                         <img src="${canvas.toDataURL('image/jpeg', 0.8)}" class="wrong-page-img">
+                    `;
+                    container.appendChild(div);
+                }
+            }
+
+            const slowOver30 = [];
+            for (let i = 0; i < pdfDoc.numPages; i++) {
+                const correct = String(userAnswers[i]) === String(correctAnswers[i]);
+                const sec = userPageDurations[i] != null ? userPageDurations[i] : 0;
+                if (correct && sec > 30) slowOver30.push({ pageNum: i + 1, sec: sec });
+            }
+            if (slowOver30.length > 0) {
+                const slowTitle = document.createElement('h3');
+                slowTitle.className = 'font-bold text-lg mb-4 mt-10 text-amber-700 no-print';
+                slowTitle.textContent = '答對但作答時間超過 30 秒的題目：';
+                container.appendChild(slowTitle);
+                for (const item of slowOver30) {
+                    const page = await pdfDoc.getPage(item.pageNum);
+                    const canvas = document.createElement('canvas');
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    canvas.height = viewport.height; canvas.width = viewport.width;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+                    const div = document.createElement('div');
+                    div.className = 'slow-item';
+                    div.innerHTML = `
+                        <p class="font-bold text-amber-700 mb-2 text-xl">第 ${item.pageNum} 題：答對，作答時間 ${item.sec} 秒（超過 30 秒）</p>
+                        <img src="${canvas.toDataURL('image/jpeg', 0.8)}" class="slow-page-img">
                     `;
                     container.appendChild(div);
                 }
@@ -352,8 +395,8 @@
         document.getElementById('student-name').addEventListener('input', checkSetupCompletion);
         document.getElementById('pdf-upload').addEventListener('change', checkSetupCompletion);
         document.addEventListener('DOMContentLoaded', tryAutoLoadPdf);
-        function prevPage() { if (currentPage > 1) renderPage(currentPage - 1); }
-        function nextPage() { if (currentPage < pdfDoc.numPages) renderPage(currentPage + 1); }
+        function prevPage() { if (currentPage > 1) { recordCurrentPageDuration(); renderPage(currentPage - 1); } }
+        function nextPage() { if (currentPage < pdfDoc.numPages) { recordCurrentPageDuration(); renderPage(currentPage + 1); } }
     </script>
 </body>
 </html>
